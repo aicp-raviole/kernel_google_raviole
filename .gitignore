@@ -95,7 +95,6 @@ modules.order
 !.get_maintainer.ignore
 !.gitattributes
 !.gitignore
-!.gitupstream
 !.mailmap
 
 #
@@ -161,3 +160,7 @@ x509.genkey
 
 # Documentation toolchain
 sphinx_*/
+
+# Build script and changelog generator
+build.sh
+changelog.sh

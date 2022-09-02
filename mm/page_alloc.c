@@ -352,20 +352,7 @@ compound_page_dtor * const compound_page_dtors[NR_COMPOUND_DTORS] = {
 
 int min_free_kbytes = 1024;
 int user_min_free_kbytes = -1;
-#ifdef CONFIG_DISCONTIGMEM
-/*
- * DiscontigMem defines memory ranges as separate pg_data_t even if the ranges
- * are not on separate NUMA nodes. Functionally this works but with
- * watermark_boost_factor, it can reclaim prematurely as the ranges can be
- * quite small. By default, do not boost watermarks on discontigmem as in
- * many cases very high-order allocations like THP are likely to be
- * unsupported and the premature reclaim offsets the advantage of long-term
- * fragmentation avoidance.
- */
 int watermark_boost_factor __read_mostly;
-#else
-int watermark_boost_factor __read_mostly = 15000;
-#endif
 int watermark_scale_factor = 10;
 
 static unsigned long nr_kernel_pages __initdata;
@@ -513,8 +500,12 @@ unsigned long __get_pfnblock_flags_mask(struct page *page,
 	bitidx = pfn_to_bitidx(page, pfn);
 	word_bitidx = bitidx / BITS_PER_LONG;
 	bitidx &= (BITS_PER_LONG-1);
-
-	word = bitmap[word_bitidx];
+	/*
+	 * This races, without locks, with set_pfnblock_flags_mask(). Ensure
+	 * a consistent read of the memory array, so that results, even though
+	 * racy, are not corrupted.
+	 */
+	word = READ_ONCE(bitmap[word_bitidx]);
 	return (word >> bitidx) & mask;
 }
 
@@ -3057,12 +3048,16 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 
 	spin_lock(&zone->lock);
 	for (i = 0; i < count; ++i) {
-		struct page *page;
+		struct page *page = NULL;
 
-		if (is_migrate_cma(migratetype))
-			page = __rmqueue_cma(zone, order, migratetype,
+		if (is_migrate_cma(migratetype)) {
+			bool is_cma_alloc = true;
+
+			trace_android_vh_cma_alloc_adjust(zone, &is_cma_alloc);
+			if (is_cma_alloc)
+				page = __rmqueue_cma(zone, order, migratetype,
 					     alloc_flags);
-		else
+		} else
 			page = __rmqueue(zone, order, migratetype, alloc_flags);
 
 		if (unlikely(page == NULL))
@@ -4104,6 +4099,11 @@ static inline unsigned int current_alloc_flags(gfp_t gfp_mask,
 {
 #ifdef CONFIG_CMA
 	unsigned int pflags = current->flags;
+	bool bypass = false;
+
+	trace_android_vh_calc_alloc_flags(pflags, gfp_mask, &alloc_flags, &bypass);
+	if (bypass)
+		return alloc_flags;
 
 	if (!(pflags & PF_MEMALLOC_NOCMA) &&
 			gfp_migratetype(gfp_mask) == MIGRATE_MOVABLE &&

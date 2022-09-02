@@ -40,6 +40,7 @@ static int try_to_freeze_tasks(bool user_only)
 	unsigned int elapsed_msecs;
 	bool wakeup = false;
 	int sleep_usecs = USEC_PER_MSEC;
+	bool todo_logging_on = false;
 
 	start = ktime_get_boottime();
 
@@ -101,7 +102,8 @@ static int try_to_freeze_tasks(bool user_only)
 		if (wq_busy)
 			show_workqueue_state();
 
-		if (pm_debug_messages_on) {
+		trace_android_vh_try_to_freeze_todo_logging(&todo_logging_on);
+		if (pm_debug_messages_on || todo_logging_on) {
 			read_lock(&tasklist_lock);
 			for_each_process_thread(g, p) {
 				if (p != current && !freezer_should_skip(p)
@@ -154,6 +156,7 @@ int freeze_processes(void)
 	pr_cont("\n");
 	BUG_ON(in_atomic());
 
+#ifndef CONFIG_ANDROID
 	/*
 	 * Now that the whole userspace is frozen we need to disable
 	 * the OOM killer to disallow any further interference with
@@ -162,6 +165,7 @@ int freeze_processes(void)
 	 */
 	if (!error && !oom_killer_disable(msecs_to_jiffies(freeze_timeout_msecs)))
 		error = -EBUSY;
+#endif
 
 	if (error)
 		thaw_processes();
@@ -206,7 +210,9 @@ void thaw_processes(void)
 	pm_freezing = false;
 	pm_nosig_freezing = false;
 
+#ifndef CONFIG_ANDROID
 	oom_killer_enable();
+#endif
 
 	pr_info("Restarting tasks ... ");
 

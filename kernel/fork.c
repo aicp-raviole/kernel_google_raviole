@@ -984,6 +984,11 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 #ifdef CONFIG_MEMCG
 	tsk->active_memcg = NULL;
 #endif
+
+#ifdef CONFIG_ANDROID_VENDOR_OEM_DATA
+	memset(&tsk->android_vendor_data1, 0, sizeof(tsk->android_vendor_data1));
+	memset(&tsk->android_oem_data1, 0, sizeof(tsk->android_oem_data1));
+#endif
 	trace_android_vh_dup_task_struct(tsk, orig);
 	return tsk;
 
@@ -1154,8 +1159,10 @@ void mmput(struct mm_struct *mm)
 {
 	might_sleep();
 
-	if (atomic_dec_and_test(&mm->mm_users))
+	if (atomic_dec_and_test(&mm->mm_users)) {
+		trace_android_vh_mmput(NULL);
 		__mmput(mm);
+	}
 }
 EXPORT_SYMBOL_GPL(mmput);
 
@@ -1526,32 +1533,6 @@ static int copy_files(unsigned long clone_flags, struct task_struct *tsk)
 	error = 0;
 out:
 	return error;
-}
-
-static int copy_io(unsigned long clone_flags, struct task_struct *tsk)
-{
-#ifdef CONFIG_BLOCK
-	struct io_context *ioc = current->io_context;
-	struct io_context *new_ioc;
-
-	if (!ioc)
-		return 0;
-	/*
-	 * Share io context with parent, if CLONE_IO is set
-	 */
-	if (clone_flags & CLONE_IO) {
-		ioc_task_link(ioc);
-		tsk->io_context = ioc;
-	} else if (ioprio_valid(ioc->ioprio)) {
-		new_ioc = get_task_io_context(tsk, GFP_KERNEL, NUMA_NO_NODE);
-		if (unlikely(!new_ioc))
-			return -ENOMEM;
-
-		new_ioc->ioprio = ioc->ioprio;
-		put_io_context(new_ioc);
-	}
-#endif
-	return 0;
 }
 
 static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
